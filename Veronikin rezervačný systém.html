@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Veronikin rezervačný systém</title>
+<style>
+:root{--bg:#fff5f7;--card:#fff;--ink:#2b1b22;--mute:#8a6f7a;--pink:#e8457a;--pink2:#fde1ea;--ok:#1f9d63;--okbg:#dff5e9;--busy:#f1e6ea;--warn:#c77b00;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1319;--card:#2a1c24;--ink:#fbeaf0;--mute:#b99aa8;--pink:#ff6b9a;--pink2:#43202f;--ok:#5ee0a0;--okbg:#17382a;--busy:#33252d;--warn:#ffb84d}}
+:root[data-theme="dark"]{--bg:#1d1319;--card:#2a1c24;--ink:#fbeaf0;--mute:#b99aa8;--pink:#ff6b9a;--pink2:#43202f;--ok:#5ee0a0;--okbg:#17382a;--busy:#33252d;--warn:#ffb84d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}
+main{max-width:640px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.7rem;margin:.2em 0 .1em;line-height:1.15}
+h1 span{color:var(--pink)}
+.sub{color:var(--mute);margin:0 0 18px}
+.card{background:var(--card);border-radius:18px;padding:16px;box-shadow:0 2px 14px rgba(232,69,122,.12);margin-bottom:16px}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.bar b{font-size:1.1rem;text-transform:capitalize}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:9px 14px;background:var(--pink);color:#fff;font-weight:600}
+button.ghost{background:var(--pink2);color:var(--pink)}
+button.sm{padding:5px 10px;font-size:.85rem}
+button:disabled{opacity:.5;cursor:default}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.dow{font-size:.72rem;color:var(--mute);text-align:center;padding-bottom:2px}
+.day{aspect-ratio:1;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:600;background:var(--busy);color:var(--mute);border:2px solid transparent;font-size:.95rem;padding:0}
+.day small{font-size:.58rem;font-weight:500}
+.day.free{background:var(--okbg);color:var(--ok);cursor:pointer}
+.day.booked{background:var(--pink2);color:var(--pink)}
+.day.sel{border-color:var(--pink)}
+.day.empty{background:none}
+.day.past{opacity:.35}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:.8rem;color:var(--mute);margin-top:10px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:4px;margin-right:5px;vertical-align:-1px}
+label{display:block;font-size:.85rem;color:var(--mute);margin:10px 0 4px}
+input,select,textarea{width:100%;font:inherit;padding:10px 12px;border-radius:12px;border:1.5px solid var(--pink2);background:var(--bg);color:var(--ink)}
+textarea{min-height:70px;resize:vertical}
+.msg{margin:10px 0 0;font-size:.9rem}
+.ok{color:var(--ok)}.err{color:var(--warn)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--pink2)}
+.row:first-child{border-top:0}
+.row .t{min-width:0}
+.row .t span{color:var(--mute);font-size:.85rem;display:block;overflow-wrap:anywhere}
+.badge{font-size:.72rem;padding:2px 8px;border-radius:99px;background:var(--pink2);color:var(--pink);margin-left:6px}
+.badge.c{background:var(--okbg);color:var(--ok)}
+.hide{display:none}
+.admin-tag{background:var(--pink);color:#fff;border-radius:99px;font-size:.7rem;padding:2px 9px;margin-left:8px;vertical-align:middle}
+</style>
+</head>
+<body>
+<main>
+  <h1>💌 <span>Veronikin</span> rezervačný systém</h1>
+  <p class="sub">Pozor, na stretnutie s Veronikou sa treba objednať vopred. Vyber si zelený deň a pošli žiadosť.</p>
+
+  <div id="app" class="card"><p class="sub" style="margin:0">Načítavam kalendár…</p></div>
+  <div id="formCard" class="card hide"></div>
+  <div id="adminCard" class="card hide"></div>
+  <div class="bar" style="justify-content:center"><button id="adminBtn" class="ghost sm hide">🔑 Admin režim</button></div>
+</main>
+
+<script>
+(function(){
+  var MONTHS=["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
+  var DOW=["Po","Ut","St","Št","Pi","So","Ne"];
+  var TIMES=["Ráno","Doobeda","Poobede","Podvečer","Večer"];
+  var state={free:{},books:{},view:new Date(),sel:null,admin:false,canEdit:false,db:null,msg:"",ready:false};
+  state.view.setDate(1);
+
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+  function key(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+  function pretty(k){var p=k.split("-");return (+p[2])+". "+MONTHS[+p[1]-1]+" "+p[0]}
+  var todayKey=key(new Date());
+
+  function render(){
+    var app=document.getElementById("app");
+    if(!state.db){
+      app.innerHTML='<p class="sub" style="margin:0">'+(state.ready?"Systém je dostupný len po prihlásení cez claude.ai. Prihlás sa a obnov stránku. 🙈":"Načítavam kalendár…")+'</p>';
+      return;
+    }
+    var y=state.view.getFullYear(),m=state.view.getMonth();
+    var first=new Date(y,m,1),lead=(first.getDay()+6)%7,days=new Date(y,m+1,0).getDate();
+    var h='<div class="bar"><button class="ghost sm" data-nav="-1">‹</button><b>'+MONTHS[m]+' '+y+(state.admin?'<span class="admin-tag">admin</span>':'')+'</b><button class="ghost sm" data-nav="1">›</button></div><div class="grid">';
+    DOW.forEach(function(d){h+='<div class="dow">'+d+'</div>'});
+    for(var i=0;i<lead;i++)h+='<div class="day empty"></div>';
+    for(var d=1;d<=days;d++){
+      var k=key(new Date(y,m,d)),past=k<todayKey,b=state.books[k],f=state.free[k];
+      var cls="day",sub="",dis="";
+      if(past){cls+=" past";dis=" disabled"}
+      else if(b){cls+=" booked";sub="<small>obsadené</small>"}
+      else if(f){cls+=" free";sub="<small>voľné</small>"}
+      if(state.sel===k)cls+=" sel";
+      var canClick=!past&&(state.admin||(f&&!b));
+      h+='<button class="'+cls+'" data-day="'+k+'"'+(canClick?"":" disabled")+'>'+d+sub+'</button>';
+    }
+    h+='</div><div class="legend"><span><i style="background:var(--okbg)"></i>voľné</span><span><i style="background:var(--pink2)"></i>obsadené</span><span><i style="background:var(--busy)"></i>Veronika nemá čas</span></div>';
+    if(state.admin)h+='<p class="sub" style="margin:10px 0 0;font-size:.85rem">Admin: klikni na deň a prepneš ho medzi „voľný“ a „nevoľný“.</p>';
+    app.innerHTML=h;
+
+    var fc=document.getElementById("formCard");
+    if(state.sel&&!state.admin&&state.free[state.sel]&&!state.books[state.sel]){
+      fc.classList.remove("hide");
+      fc.innerHTML='<b>Žiadosť na '+esc(pretty(state.sel))+'</b>'+
+        '<label>Tvoje meno</label><input id="fName" maxlength="40" placeholder="Ako ťa mám zapísať?">'+
+        '<label>Kedy počas dňa</label><select id="fTime">'+TIMES.map(function(t){return "<option>"+t+"</option>"}).join("")+'</select>'+
+        '<label>Čo budeme robiť?</label><input id="fPlan" maxlength="80" placeholder="káva, prechádzka, film…">'+
+        '<label>Poznámka (nepovinné)</label><textarea id="fNote" maxlength="300"></textarea>'+
+        '<div style="margin-top:12px"><button id="fSend">Odoslať rezerváciu</button></div><p class="msg" id="fMsg"></p>';
+    }else{
+      fc.classList.add("hide");fc.innerHTML="";
+      if(state.msg){fc.classList.remove("hide");fc.innerHTML='<p class="msg ok" style="margin:0">'+esc(state.msg)+'</p>'}
+    }
+
+    var ac=document.getElementById("adminCard"),keys=Object.keys(state.books).sort();
+    if(state.admin){
+      ac.classList.remove("hide");
+      var a='<b>Rezervácie</b>';
+      if(!keys.length)a+='<p class="sub" style="margin:8px 0 0">Zatiaľ nikto. Si vzácna. ✨</p>';
+      keys.forEach(function(k){
+        var b=state.books[k],ok=b.status==="potvrdené";
+        a+='<div class="row"><div class="t"><b>'+esc(pretty(k))+'</b> · '+esc(b.name)+'<span class="badge'+(ok?" c":"")+'">'+esc(b.status||"čaká")+'</span><span>'+esc(b.time)+' · '+esc(b.plan)+(b.note?' · „'+esc(b.note)+'“':'')+'</span></div><div>'+
+          (ok?'':'<button class="sm" data-ok="'+k+'">✓</button> ')+'<button class="sm ghost" data-del="'+k+'">✕</button></div></div>';
+      });
+      ac.innerHTML=a;
+    }else{ac.classList.add("hide");ac.innerHTML=""}
+
+    var ab=document.getElementById("adminBtn");
+    if(state.canEdit){ab.classList.remove("hide");ab.textContent=state.admin?"👀 Zobraziť ako návštevník":"🔑 Admin režim"}
+  }
+
+  document.addEventListener("click",function(e){
+    var t=e.target.closest("button");if(!t)return;
+    if(t.dataset.nav){state.view=new Date(state.view.getFullYear(),state.view.getMonth()+(+t.dataset.nav),1);state.msg="";render();return}
+    if(t.id==="adminBtn"){state.admin=!state.admin;state.sel=null;state.msg="";render();return}
+    if(t.dataset.day){
+      var k=t.dataset.day;state.msg="";
+      if(state.admin){
+        var ref=state.db.collection("availability").doc(k);
+        (state.free[k]?ref.delete():ref.set({free:true})).catch(function(){alert("Nepodarilo sa uložiť.")});
+      }else{state.sel=k;render()}
+      return;
+    }
+    if(t.dataset.ok){state.db.collection("bookings").doc(t.dataset.ok).update({status:"potvrdené"}).catch(function(){});return}
+    if(t.dataset.del){if(confirm("Zrušiť túto rezerváciu?"))state.db.collection("bookings").doc(t.dataset.del).delete().catch(function(){});return}
+    if(t.id==="fSend"){
+      var name=document.getElementById("fName").value.trim(),msg=document.getElementById("fMsg");
+      if(!name){msg.className="msg err";msg.textContent="Napíš prosím svoje meno.";return}
+      var k2=state.sel;t.disabled=true;
+      state.db.collection("bookings").doc(k2).get().then(function(s){
+        if(s.exists){msg.className="msg err";msg.textContent="Tento deň si už niekto stihol zarezervovať.";t.disabled=false;return}
+        return state.db.collection("bookings").doc(k2).set({
+          name:name,time:document.getElementById("fTime").value,plan:document.getElementById("fPlan").value.trim()||"nevie sa",
+          note:document.getElementById("fNote").value.trim(),status:"čaká",at:Date.now()
+        }).then(function(){state.msg="Hotovo! Žiadosť na "+pretty(k2)+" je odoslaná. Veronika ju čoskoro potvrdí. 💖";state.sel=null;render()});
+      }).catch(function(){msg.className="msg err";msg.textContent="Nepodarilo sa odoslať, skús znova.";t.disabled=false});
+    }
+  });
+
+  function snap(name,target){
+    var done=false;
+    state.db.collection(name).onSnapshot(function(s){
+      var o={};s.docs.forEach(function(d){o[d.id]=d.data()||{}});
+      state[target]=o;render();
+    },function(){render()});
+  }
+
+  render();
+  if(window.claude&&claude.use){
+    Promise.all([claude.use("db"),claude.use("user")]).then(function(r){
+      state.ready=true;state.db=r[0];
+      if(r[1]){try{r[1].canEdit().then(function(v){state.canEdit=!!v;render()})}catch(e){}}
+      if(state.db){snap("availability","free");snap("bookings","books")}
+      render();
+    }).catch(function(){state.ready=true;render()});
+    setTimeout(function(){if(!state.ready){state.ready=true;render()}},10000);
+  }else{state.ready=true;render()}
+})();
+</script>
+</body>
+</html>
