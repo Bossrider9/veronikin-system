@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Veronikin rezervačný systém</title>
 <style>
-:root{--bg:#fff5f7;--card:#fff;--ink:#2b1b22;--mute:#8a6f7a;--pink:#e8457a;--pink2:#fde1ea;--ok:#1f9d63;--okbg:#dff5e9;--busy:#f1e6ea;--warn:#c77b00}
-@media (prefers-color-scheme:dark){:root{--bg:#1d1319;--card:#2a1c24;--ink:#fbeaf0;--mute:#b99aa8;--pink:#ff6b9a;--pink2:#43202f;--ok:#5ee0a0;--okbg:#17382a;--busy:#33252d;--warn:#ffb84d}}
+:root{--bg:#fff5f7;--card:#fff;--ink:#2b1b22;--mute:#8a6f7a;--pink:#e8457a;--pink2:#fde1ea;--ok:#1f9d63;--okbg:#dff5e9;--busy:#f1e6ea;--warn:#c77b00;--bk:#a06a00;--bkbg:#fff0c9}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1319;--card:#2a1c24;--ink:#fbeaf0;--mute:#b99aa8;--pink:#ff6b9a;--pink2:#43202f;--ok:#5ee0a0;--okbg:#17382a;--busy:#33252d;--warn:#ffb84d;--bk:#ffcc66;--bkbg:#3a2f12}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}
 main{max-width:640px;margin:0 auto;padding:20px 16px 48px}
@@ -20,12 +20,15 @@ button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:9px 14px;
 button.ghost{background:var(--pink2);color:var(--pink)}
 button.sm{padding:5px 10px;font-size:.85rem}
 button:disabled{opacity:.5;cursor:default}
+.picker{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+.picker .lbl{color:var(--mute);font-size:.85rem}
 .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
 .dow{font-size:.72rem;color:var(--mute);text-align:center;padding-bottom:2px}
 .day{aspect-ratio:1;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:600;background:var(--busy);color:var(--mute);border:2px solid transparent;font-size:.95rem;padding:0}
 .day small{font-size:.58rem;font-weight:500}
 .day.free{background:var(--okbg);color:var(--ok);cursor:pointer}
-.day.booked{background:var(--pink2);color:var(--pink)}
+.day.free.trnava{background:var(--pink2);color:var(--pink)}
+.day.booked{background:var(--bkbg);color:var(--bk)}
 .day.sel{border-color:var(--pink)}
 .day.empty{background:none}
 .day.past{opacity:.35}
@@ -50,7 +53,7 @@ textarea{min-height:70px;resize:vertical}
 <body>
 <main>
   <h1>💌 <span>Veronikin</span> rezervačný systém</h1>
-  <p class="sub">Pozor, na stretnutie s Veronikou sa treba objednať vopred. Vyber si zelený deň a pošli žiadosť.</p>
+  <p class="sub">Pozor, na stretnutie s Veronikou sa treba objednať vopred. Vyber si voľný deň (zelený = doma, ružový = v Trnave) a pošli žiadosť.</p>
 
   <div id="app" class="card"><p class="sub" style="margin:0">Načítavam kalendár…</p></div>
   <div id="formCard" class="card hide"></div>
@@ -75,14 +78,15 @@ const firebaseConfig = {
   messagingSenderId: "642833982438",
   appId: "1:642833982438:web:ca5afe8fb91150f4462c27"
 };
-/* ===== GMAIL VERONIKY (admin). Musí byť rovnaký ako v pravidlách Firestore ===== */
+/* ===== ADMINI (musia byť rovnakí ako v pravidlách Firestore) ===== */
 const ADMIN_EMAILS = ["m.valchon@gmail.com", "v.holeckovaa232@gmail.com"];
 /* ================================================================== */
 
 const MONTHS=["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
 const DOW=["Po","Ut","St","Št","Pi","So","Ne"];
 const TIMES=["Ráno","Doobeda","Poobede","Podvečer","Večer"];
-const state={free:{},books:{},view:new Date(),sel:null,admin:false,isAdmin:false,msg:"",loaded:false,error:""};
+const PLACES={doma:{label:"doma",icon:"🏠"},trnava:{label:"Trnava",icon:"🎓"}};
+const state={free:{},books:{},view:new Date(),sel:null,admin:false,isAdmin:false,place:"doma",msg:"",loaded:false,error:""};
 state.view.setDate(1);
 
 let db,auth;
@@ -94,6 +98,7 @@ try{
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function key(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
 function pretty(k){const p=k.split("-");return (+p[2])+". "+MONTHS[+p[1]-1]+" "+p[0]}
+function placeOf(f){return f&&f.place==="trnava"?"trnava":"doma"}
 const todayKey=key(new Date());
 
 function render(){
@@ -102,7 +107,12 @@ function render(){
   if(!state.loaded){app.innerHTML='<p class="sub" style="margin:0">Načítavam kalendár…</p>';return}
   const y=state.view.getFullYear(),m=state.view.getMonth();
   const lead=(new Date(y,m,1).getDay()+6)%7,days=new Date(y,m+1,0).getDate();
-  let h='<div class="bar"><button class="ghost sm" data-nav="-1">‹</button><b>'+MONTHS[m]+' '+y+(state.admin?'<span class="admin-tag">admin</span>':'')+'</b><button class="ghost sm" data-nav="1">›</button></div><div class="grid">';
+  let h='<div class="bar"><button class="ghost sm" data-nav="-1">‹</button><b>'+MONTHS[m]+' '+y+(state.admin?'<span class="admin-tag">admin</span>':'')+'</b><button class="ghost sm" data-nav="1">›</button></div>';
+  if(state.admin){
+    h+='<div class="picker"><span class="lbl">Označuješ ako:</span>'+
+      ['doma','trnava'].map(p=>'<button class="sm'+(state.place===p?'':' ghost')+'" data-place="'+p+'">'+PLACES[p].icon+' '+PLACES[p].label.charAt(0).toUpperCase()+PLACES[p].label.slice(1)+'</button>').join('')+'</div>';
+  }
+  h+='<div class="grid">';
   DOW.forEach(d=>{h+='<div class="dow">'+d+'</div>'});
   for(let i=0;i<lead;i++)h+='<div class="day empty"></div>';
   for(let d=1;d<=days;d++){
@@ -110,19 +120,20 @@ function render(){
     let cls="day",sub="";
     if(past)cls+=" past";
     else if(b){cls+=" booked";sub="<small>obsadené</small>"}
-    else if(f){cls+=" free";sub="<small>voľné</small>"}
+    else if(f){const p=placeOf(f);cls+=" free "+p;sub="<small>"+PLACES[p].label+"</small>"}
     if(state.sel===k)cls+=" sel";
     const can=!past&&(state.admin||(f&&!b));
     h+='<button class="'+cls+'" data-day="'+k+'"'+(can?"":" disabled")+'>'+d+sub+'</button>';
   }
-  h+='</div><div class="legend"><span><i style="background:var(--okbg)"></i>voľné</span><span><i style="background:var(--pink2)"></i>obsadené</span><span><i style="background:var(--busy)"></i>Veronika nemá čas</span></div>';
-  if(state.admin)h+='<p class="sub" style="margin:10px 0 0;font-size:.85rem">Admin: klikni na deň a prepneš ho medzi „voľný“ a „nevoľný“.</p>';
+  h+='</div><div class="legend"><span><i style="background:var(--okbg)"></i>🏠 doma</span><span><i style="background:var(--pink2)"></i>🎓 Trnava</span><span><i style="background:var(--bkbg)"></i>obsadené</span><span><i style="background:var(--busy)"></i>Veronika nemá čas</span></div>';
+  if(state.admin)h+='<p class="sub" style="margin:10px 0 0;font-size:.85rem">Admin: vyber miesto hore a klikni na deň. Ak klikneš na deň s rovnakým miestom, zruší sa. Ak s iným, prepne sa na vybrané miesto.</p>';
   app.innerHTML=h;
 
   const fc=document.getElementById("formCard");
   if(state.sel&&!state.admin&&state.free[state.sel]&&!state.books[state.sel]){
+    const p=placeOf(state.free[state.sel]);
     fc.classList.remove("hide");
-    fc.innerHTML='<b>Žiadosť na '+esc(pretty(state.sel))+'</b>'+
+    fc.innerHTML='<b>Žiadosť na '+esc(pretty(state.sel))+' · '+PLACES[p].icon+' '+PLACES[p].label+'</b>'+
       '<label>Tvoje meno</label><input id="fName" maxlength="40" placeholder="Ako ťa mám zapísať?">'+
       '<label>Kedy počas dňa</label><select id="fTime">'+TIMES.map(t=>"<option>"+t+"</option>").join("")+'</select>'+
       '<label>Čo budeme robiť?</label><input id="fPlan" maxlength="80" placeholder="káva, prechádzka, film…">'+
@@ -139,8 +150,9 @@ function render(){
     let a='<b>Rezervácie</b>';
     if(!keys.length)a+='<p class="sub" style="margin:8px 0 0">Zatiaľ nikto. Si vzácna. ✨</p>';
     keys.forEach(k=>{
-      const b=state.books[k],ok=b.status==="potvrdené";
-      a+='<div class="row"><div class="t"><b>'+esc(pretty(k))+'</b> · '+esc(b.name)+'<span class="badge'+(ok?" c":"")+'">'+esc(b.status||"čaká")+'</span><span>'+esc(b.time)+' · '+esc(b.plan)+(b.note?' · „'+esc(b.note)+'“':'')+'</span></div><div>'+
+      const b=state.books[k],ok=b.status==="potvrdené",f=state.free[k];
+      const where=f?' · '+PLACES[placeOf(f)].icon+' '+PLACES[placeOf(f)].label:'';
+      a+='<div class="row"><div class="t"><b>'+esc(pretty(k))+'</b>'+where+' · '+esc(b.name)+'<span class="badge'+(ok?" c":"")+'">'+esc(b.status||"čaká")+'</span><span>'+esc(b.time)+' · '+esc(b.plan)+(b.note?' · „'+esc(b.note)+'“':'')+'</span></div><div>'+
         (ok?'':'<button class="sm" data-ok="'+k+'">✓</button> ')+'<button class="sm ghost" data-del="'+k+'">✕</button></div></div>';
     });
     ac.innerHTML=a;
@@ -156,6 +168,7 @@ function render(){
 document.addEventListener("click",async e=>{
   const t=e.target.closest("button");if(!t||!db)return;
   if(t.dataset.nav){state.view=new Date(state.view.getFullYear(),state.view.getMonth()+(+t.dataset.nav),1);state.msg="";render();return}
+  if(t.dataset.place){state.place=t.dataset.place;render();return}
   if(t.id==="loginBtn"){
     if(auth.currentUser){await signOut(auth);return}
     try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(err){alert("Prihlásenie zlyhalo.")}
@@ -165,8 +178,11 @@ document.addEventListener("click",async e=>{
   if(t.dataset.day){
     const k=t.dataset.day;state.msg="";
     if(state.admin){
-      try{state.free[k]?await deleteDoc(doc(db,"availability",k)):await setDoc(doc(db,"availability",k),{free:true})}
-      catch(err){alert("Nepodarilo sa uložiť. Si prihlásená ako admin?")}
+      try{
+        const cur=state.free[k];
+        if(cur&&placeOf(cur)===state.place)await deleteDoc(doc(db,"availability",k));
+        else await setDoc(doc(db,"availability",k),{free:true,place:state.place});
+      }catch(err){alert("Nepodarilo sa uložiť. Si prihlásená ako admin?")}
     }else{state.sel=k;render()}
     return;
   }
@@ -196,7 +212,7 @@ if(db){
   onSnapshot(collection(db,"availability"),s=>{const o={};s.forEach(d=>o[d.id]=d.data());state.free=o;state.loaded?render():ready()},onErr);
   onSnapshot(collection(db,"bookings"),s=>{const o={};s.forEach(d=>o[d.id]=d.data());state.books=o;state.loaded?render():ready()},onErr);
   onAuthStateChanged(auth,u=>{
-state.isAdmin=!!(u&&u.email&&ADMIN_EMAILS.map(x=>x.toLowerCase()).includes(u.email.toLowerCase()));
+    state.isAdmin=!!(u&&u.email&&ADMIN_EMAILS.map(x=>x.toLowerCase()).includes(u.email.toLowerCase()));
     if(!state.isAdmin)state.admin=false;
     render();
   });
