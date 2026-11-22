@@ -76,7 +76,7 @@ const firebaseConfig = {
   appId: "1:642833982438:web:ca5afe8fb91150f4462c27"
 };
 /* ===== GMAIL VERONIKY (admin). Musí byť rovnaký ako v pravidlách Firestore ===== */
-const ADMIN_EMAIL = "m.valchon@gmail.com";
+const ADMIN_EMAILS = ["m.valchon@gmail.com", "veronika@gmail.com"];
 /* ================================================================== */
 
 const MONTHS=["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
@@ -196,7 +196,7 @@ if(db){
   onSnapshot(collection(db,"availability"),s=>{const o={};s.forEach(d=>o[d.id]=d.data());state.free=o;state.loaded?render():ready()},onErr);
   onSnapshot(collection(db,"bookings"),s=>{const o={};s.forEach(d=>o[d.id]=d.data());state.books=o;state.loaded?render():ready()},onErr);
   onAuthStateChanged(auth,u=>{
-    state.isAdmin=!!(u&&u.email&&u.email.toLowerCase()===ADMIN_EMAIL.toLowerCase());
+state.isAdmin=!!(u&&u.email&&ADMIN_EMAILS.map(x=>x.toLowerCase()).includes(u.email.toLowerCase()));
     if(!state.isAdmin)state.admin=false;
     render();
   });
