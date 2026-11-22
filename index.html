@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Veronikin rezervačný systém</title>
 <style>
-:root{--bg:#fff5f7;--card:#fff;--ink:#2b1b22;--mute:#8a6f7a;--pink:#e8457a;--pink2:#fde1ea;--ok:#1f9d63;--okbg:#dff5e9;--busy:#f1e6ea;--warn:#c77b00;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1319;--card:#2a1c24;--ink:#fbeaf0;--mute:#b99aa8;--pink:#ff6b9a;--pink2:#43202f;--ok:#5ee0a0;--okbg:#17382a;--busy:#33252d;--warn:#ffb84d}}
-:root[data-theme="dark"]{--bg:#1d1319;--card:#2a1c24;--ink:#fbeaf0;--mute:#b99aa8;--pink:#ff6b9a;--pink2:#43202f;--ok:#5ee0a0;--okbg:#17382a;--busy:#33252d;--warn:#ffb84d}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
+:root{--bg:#fff5f7;--card:#fff;--ink:#2b1b22;--mute:#8a6f7a;--pink:#e8457a;--pink2:#fde1ea;--ok:#1f9d63;--okbg:#dff5e9;--busy:#f1e6ea;--warn:#c77b00}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1319;--card:#2a1c24;--ink:#fbeaf0;--mute:#b99aa8;--pink:#ff6b9a;--pink2:#43202f;--ok:#5ee0a0;--okbg:#17382a;--busy:#33252d;--warn:#ffb84d}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}
 main{max-width:640px;margin:0 auto;padding:20px 16px 48px}
@@ -46,6 +44,7 @@ textarea{min-height:70px;resize:vertical}
 .badge.c{background:var(--okbg);color:var(--ok)}
 .hide{display:none}
 .admin-tag{background:var(--pink);color:#fff;border-radius:99px;font-size:.7rem;padding:2px 9px;margin-left:8px;vertical-align:middle}
+.foot{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -56,125 +55,153 @@ textarea{min-height:70px;resize:vertical}
   <div id="app" class="card"><p class="sub" style="margin:0">Načítavam kalendár…</p></div>
   <div id="formCard" class="card hide"></div>
   <div id="adminCard" class="card hide"></div>
-  <div class="bar" style="justify-content:center"><button id="adminBtn" class="ghost sm hide">🔑 Admin režim</button></div>
+  <div class="foot">
+    <button id="loginBtn" class="ghost sm">🔑 Admin prihlásenie</button>
+    <button id="adminBtn" class="ghost sm hide"></button>
+  </div>
 </main>
 
-<script>
-(function(){
-  var MONTHS=["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
-  var DOW=["Po","Ut","St","Št","Pi","So","Ne"];
-  var TIMES=["Ráno","Doobeda","Poobede","Podvečer","Večer"];
-  var state={free:{},books:{},view:new Date(),sel:null,admin:false,canEdit:false,db:null,msg:"",ready:false};
-  state.view.setDate(1);
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
-  function key(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
-  function pretty(k){var p=k.split("-");return (+p[2])+". "+MONTHS[+p[1]-1]+" "+p[0]}
-  var todayKey=key(new Date());
+/* ===== FIREBASE ÚDAJE ===== */
+const firebaseConfig = {
+  apiKey: "AIzaSyANGI0j5JYrFZoJ-ZbgOI3CAIcZezBHHHs",
+  authDomain: "veronikin-system.firebaseapp.com",
+  projectId: "veronikin-system",
+  storageBucket: "veronikin-system.firebasestorage.app",
+  messagingSenderId: "642833982438",
+  appId: "1:642833982438:web:ca5afe8fb91150f4462c27"
+};
+/* ===== GMAIL VERONIKY (admin). Musí byť rovnaký ako v pravidlách Firestore ===== */
+const ADMIN_EMAIL = "m.valchon@gmail.com";
+/* ================================================================== */
 
-  function render(){
-    var app=document.getElementById("app");
-    if(!state.db){
-      app.innerHTML='<p class="sub" style="margin:0">'+(state.ready?"Systém je dostupný len po prihlásení cez claude.ai. Prihlás sa a obnov stránku. 🙈":"Načítavam kalendár…")+'</p>';
-      return;
-    }
-    var y=state.view.getFullYear(),m=state.view.getMonth();
-    var first=new Date(y,m,1),lead=(first.getDay()+6)%7,days=new Date(y,m+1,0).getDate();
-    var h='<div class="bar"><button class="ghost sm" data-nav="-1">‹</button><b>'+MONTHS[m]+' '+y+(state.admin?'<span class="admin-tag">admin</span>':'')+'</b><button class="ghost sm" data-nav="1">›</button></div><div class="grid">';
-    DOW.forEach(function(d){h+='<div class="dow">'+d+'</div>'});
-    for(var i=0;i<lead;i++)h+='<div class="day empty"></div>';
-    for(var d=1;d<=days;d++){
-      var k=key(new Date(y,m,d)),past=k<todayKey,b=state.books[k],f=state.free[k];
-      var cls="day",sub="",dis="";
-      if(past){cls+=" past";dis=" disabled"}
-      else if(b){cls+=" booked";sub="<small>obsadené</small>"}
-      else if(f){cls+=" free";sub="<small>voľné</small>"}
-      if(state.sel===k)cls+=" sel";
-      var canClick=!past&&(state.admin||(f&&!b));
-      h+='<button class="'+cls+'" data-day="'+k+'"'+(canClick?"":" disabled")+'>'+d+sub+'</button>';
-    }
-    h+='</div><div class="legend"><span><i style="background:var(--okbg)"></i>voľné</span><span><i style="background:var(--pink2)"></i>obsadené</span><span><i style="background:var(--busy)"></i>Veronika nemá čas</span></div>';
-    if(state.admin)h+='<p class="sub" style="margin:10px 0 0;font-size:.85rem">Admin: klikni na deň a prepneš ho medzi „voľný“ a „nevoľný“.</p>';
-    app.innerHTML=h;
+const MONTHS=["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
+const DOW=["Po","Ut","St","Št","Pi","So","Ne"];
+const TIMES=["Ráno","Doobeda","Poobede","Podvečer","Večer"];
+const state={free:{},books:{},view:new Date(),sel:null,admin:false,isAdmin:false,msg:"",loaded:false,error:""};
+state.view.setDate(1);
 
-    var fc=document.getElementById("formCard");
-    if(state.sel&&!state.admin&&state.free[state.sel]&&!state.books[state.sel]){
-      fc.classList.remove("hide");
-      fc.innerHTML='<b>Žiadosť na '+esc(pretty(state.sel))+'</b>'+
-        '<label>Tvoje meno</label><input id="fName" maxlength="40" placeholder="Ako ťa mám zapísať?">'+
-        '<label>Kedy počas dňa</label><select id="fTime">'+TIMES.map(function(t){return "<option>"+t+"</option>"}).join("")+'</select>'+
-        '<label>Čo budeme robiť?</label><input id="fPlan" maxlength="80" placeholder="káva, prechádzka, film…">'+
-        '<label>Poznámka (nepovinné)</label><textarea id="fNote" maxlength="300"></textarea>'+
-        '<div style="margin-top:12px"><button id="fSend">Odoslať rezerváciu</button></div><p class="msg" id="fMsg"></p>';
-    }else{
-      fc.classList.add("hide");fc.innerHTML="";
-      if(state.msg){fc.classList.remove("hide");fc.innerHTML='<p class="msg ok" style="margin:0">'+esc(state.msg)+'</p>'}
-    }
+let db,auth;
+try{
+  const app=initializeApp(firebaseConfig);
+  db=getFirestore(app);auth=getAuth(app);
+}catch(e){state.error="Chyba nastavenia Firebase."}
 
-    var ac=document.getElementById("adminCard"),keys=Object.keys(state.books).sort();
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function key(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function pretty(k){const p=k.split("-");return (+p[2])+". "+MONTHS[+p[1]-1]+" "+p[0]}
+const todayKey=key(new Date());
+
+function render(){
+  const app=document.getElementById("app");
+  if(state.error){app.innerHTML='<p class="msg err" style="margin:0">'+esc(state.error)+'</p>';return}
+  if(!state.loaded){app.innerHTML='<p class="sub" style="margin:0">Načítavam kalendár…</p>';return}
+  const y=state.view.getFullYear(),m=state.view.getMonth();
+  const lead=(new Date(y,m,1).getDay()+6)%7,days=new Date(y,m+1,0).getDate();
+  let h='<div class="bar"><button class="ghost sm" data-nav="-1">‹</button><b>'+MONTHS[m]+' '+y+(state.admin?'<span class="admin-tag">admin</span>':'')+'</b><button class="ghost sm" data-nav="1">›</button></div><div class="grid">';
+  DOW.forEach(d=>{h+='<div class="dow">'+d+'</div>'});
+  for(let i=0;i<lead;i++)h+='<div class="day empty"></div>';
+  for(let d=1;d<=days;d++){
+    const k=key(new Date(y,m,d)),past=k<todayKey,b=state.books[k],f=state.free[k];
+    let cls="day",sub="";
+    if(past)cls+=" past";
+    else if(b){cls+=" booked";sub="<small>obsadené</small>"}
+    else if(f){cls+=" free";sub="<small>voľné</small>"}
+    if(state.sel===k)cls+=" sel";
+    const can=!past&&(state.admin||(f&&!b));
+    h+='<button class="'+cls+'" data-day="'+k+'"'+(can?"":" disabled")+'>'+d+sub+'</button>';
+  }
+  h+='</div><div class="legend"><span><i style="background:var(--okbg)"></i>voľné</span><span><i style="background:var(--pink2)"></i>obsadené</span><span><i style="background:var(--busy)"></i>Veronika nemá čas</span></div>';
+  if(state.admin)h+='<p class="sub" style="margin:10px 0 0;font-size:.85rem">Admin: klikni na deň a prepneš ho medzi „voľný“ a „nevoľný“.</p>';
+  app.innerHTML=h;
+
+  const fc=document.getElementById("formCard");
+  if(state.sel&&!state.admin&&state.free[state.sel]&&!state.books[state.sel]){
+    fc.classList.remove("hide");
+    fc.innerHTML='<b>Žiadosť na '+esc(pretty(state.sel))+'</b>'+
+      '<label>Tvoje meno</label><input id="fName" maxlength="40" placeholder="Ako ťa mám zapísať?">'+
+      '<label>Kedy počas dňa</label><select id="fTime">'+TIMES.map(t=>"<option>"+t+"</option>").join("")+'</select>'+
+      '<label>Čo budeme robiť?</label><input id="fPlan" maxlength="80" placeholder="káva, prechádzka, film…">'+
+      '<label>Poznámka (nepovinné)</label><textarea id="fNote" maxlength="300"></textarea>'+
+      '<div style="margin-top:12px"><button id="fSend">Odoslať rezerváciu</button></div><p class="msg" id="fMsg"></p>';
+  }else{
+    fc.classList.add("hide");fc.innerHTML="";
+    if(state.msg){fc.classList.remove("hide");fc.innerHTML='<p class="msg ok" style="margin:0">'+esc(state.msg)+'</p>'}
+  }
+
+  const ac=document.getElementById("adminCard"),keys=Object.keys(state.books).sort();
+  if(state.admin){
+    ac.classList.remove("hide");
+    let a='<b>Rezervácie</b>';
+    if(!keys.length)a+='<p class="sub" style="margin:8px 0 0">Zatiaľ nikto. Si vzácna. ✨</p>';
+    keys.forEach(k=>{
+      const b=state.books[k],ok=b.status==="potvrdené";
+      a+='<div class="row"><div class="t"><b>'+esc(pretty(k))+'</b> · '+esc(b.name)+'<span class="badge'+(ok?" c":"")+'">'+esc(b.status||"čaká")+'</span><span>'+esc(b.time)+' · '+esc(b.plan)+(b.note?' · „'+esc(b.note)+'“':'')+'</span></div><div>'+
+        (ok?'':'<button class="sm" data-ok="'+k+'">✓</button> ')+'<button class="sm ghost" data-del="'+k+'">✕</button></div></div>';
+    });
+    ac.innerHTML=a;
+  }else{ac.classList.add("hide");ac.innerHTML=""}
+
+  const lb=document.getElementById("loginBtn"),ab=document.getElementById("adminBtn");
+  const signedIn=auth&&auth.currentUser;
+  lb.textContent=signedIn?"Odhlásiť sa":"🔑 Admin prihlásenie";
+  if(state.isAdmin){ab.classList.remove("hide");ab.textContent=state.admin?"👀 Zobraziť ako návštevník":"🔧 Admin režim"}
+  else ab.classList.add("hide");
+}
+
+document.addEventListener("click",async e=>{
+  const t=e.target.closest("button");if(!t||!db)return;
+  if(t.dataset.nav){state.view=new Date(state.view.getFullYear(),state.view.getMonth()+(+t.dataset.nav),1);state.msg="";render();return}
+  if(t.id==="loginBtn"){
+    if(auth.currentUser){await signOut(auth);return}
+    try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(err){alert("Prihlásenie zlyhalo.")}
+    return;
+  }
+  if(t.id==="adminBtn"){state.admin=!state.admin;state.sel=null;state.msg="";render();return}
+  if(t.dataset.day){
+    const k=t.dataset.day;state.msg="";
     if(state.admin){
-      ac.classList.remove("hide");
-      var a='<b>Rezervácie</b>';
-      if(!keys.length)a+='<p class="sub" style="margin:8px 0 0">Zatiaľ nikto. Si vzácna. ✨</p>';
-      keys.forEach(function(k){
-        var b=state.books[k],ok=b.status==="potvrdené";
-        a+='<div class="row"><div class="t"><b>'+esc(pretty(k))+'</b> · '+esc(b.name)+'<span class="badge'+(ok?" c":"")+'">'+esc(b.status||"čaká")+'</span><span>'+esc(b.time)+' · '+esc(b.plan)+(b.note?' · „'+esc(b.note)+'“':'')+'</span></div><div>'+
-          (ok?'':'<button class="sm" data-ok="'+k+'">✓</button> ')+'<button class="sm ghost" data-del="'+k+'">✕</button></div></div>';
+      try{state.free[k]?await deleteDoc(doc(db,"availability",k)):await setDoc(doc(db,"availability",k),{free:true})}
+      catch(err){alert("Nepodarilo sa uložiť. Si prihlásená ako admin?")}
+    }else{state.sel=k;render()}
+    return;
+  }
+  if(t.dataset.ok){try{await updateDoc(doc(db,"bookings",t.dataset.ok),{status:"potvrdené"})}catch(err){alert("Nepodarilo sa potvrdiť.")}return}
+  if(t.dataset.del){if(confirm("Zrušiť túto rezerváciu?")){try{await deleteDoc(doc(db,"bookings",t.dataset.del))}catch(err){alert("Nepodarilo sa zrušiť.")}}return}
+  if(t.id==="fSend"){
+    const name=document.getElementById("fName").value.trim(),msg=document.getElementById("fMsg"),k=state.sel;
+    if(!name){msg.className="msg err";msg.textContent="Napíš prosím svoje meno.";return}
+    t.disabled=true;
+    try{
+      const s=await getDoc(doc(db,"bookings",k));
+      if(s.exists()){msg.className="msg err";msg.textContent="Tento deň si už niekto stihol zarezervovať.";t.disabled=false;return}
+      await setDoc(doc(db,"bookings",k),{
+        name:name,time:document.getElementById("fTime").value,
+        plan:document.getElementById("fPlan").value.trim()||"nevie sa",
+        note:document.getElementById("fNote").value.trim(),status:"čaká",at:Date.now()
       });
-      ac.innerHTML=a;
-    }else{ac.classList.add("hide");ac.innerHTML=""}
-
-    var ab=document.getElementById("adminBtn");
-    if(state.canEdit){ab.classList.remove("hide");ab.textContent=state.admin?"👀 Zobraziť ako návštevník":"🔑 Admin režim"}
+      state.msg="Hotovo! Žiadosť na "+pretty(k)+" je odoslaná. Veronika ju čoskoro potvrdí. 💖";state.sel=null;render();
+    }catch(err){msg.className="msg err";msg.textContent="Nepodarilo sa odoslať, skús znova.";t.disabled=false}
   }
+});
 
-  document.addEventListener("click",function(e){
-    var t=e.target.closest("button");if(!t)return;
-    if(t.dataset.nav){state.view=new Date(state.view.getFullYear(),state.view.getMonth()+(+t.dataset.nav),1);state.msg="";render();return}
-    if(t.id==="adminBtn"){state.admin=!state.admin;state.sel=null;state.msg="";render();return}
-    if(t.dataset.day){
-      var k=t.dataset.day;state.msg="";
-      if(state.admin){
-        var ref=state.db.collection("availability").doc(k);
-        (state.free[k]?ref.delete():ref.set({free:true})).catch(function(){alert("Nepodarilo sa uložiť.")});
-      }else{state.sel=k;render()}
-      return;
-    }
-    if(t.dataset.ok){state.db.collection("bookings").doc(t.dataset.ok).update({status:"potvrdené"}).catch(function(){});return}
-    if(t.dataset.del){if(confirm("Zrušiť túto rezerváciu?"))state.db.collection("bookings").doc(t.dataset.del).delete().catch(function(){});return}
-    if(t.id==="fSend"){
-      var name=document.getElementById("fName").value.trim(),msg=document.getElementById("fMsg");
-      if(!name){msg.className="msg err";msg.textContent="Napíš prosím svoje meno.";return}
-      var k2=state.sel;t.disabled=true;
-      state.db.collection("bookings").doc(k2).get().then(function(s){
-        if(s.exists){msg.className="msg err";msg.textContent="Tento deň si už niekto stihol zarezervovať.";t.disabled=false;return}
-        return state.db.collection("bookings").doc(k2).set({
-          name:name,time:document.getElementById("fTime").value,plan:document.getElementById("fPlan").value.trim()||"nevie sa",
-          note:document.getElementById("fNote").value.trim(),status:"čaká",at:Date.now()
-        }).then(function(){state.msg="Hotovo! Žiadosť na "+pretty(k2)+" je odoslaná. Veronika ju čoskoro potvrdí. 💖";state.sel=null;render()});
-      }).catch(function(){msg.className="msg err";msg.textContent="Nepodarilo sa odoslať, skús znova.";t.disabled=false});
-    }
+if(db){
+  let n=0;
+  const ready=()=>{if(++n>=2){state.loaded=true}render()};
+  const onErr=()=>{state.error="Nepodarilo sa načítať dáta. Skontroluj nastavenie Firebase.";render()};
+  onSnapshot(collection(db,"availability"),s=>{const o={};s.forEach(d=>o[d.id]=d.data());state.free=o;state.loaded?render():ready()},onErr);
+  onSnapshot(collection(db,"bookings"),s=>{const o={};s.forEach(d=>o[d.id]=d.data());state.books=o;state.loaded?render():ready()},onErr);
+  onAuthStateChanged(auth,u=>{
+    state.isAdmin=!!(u&&u.email&&u.email.toLowerCase()===ADMIN_EMAIL.toLowerCase());
+    if(!state.isAdmin)state.admin=false;
+    render();
   });
-
-  function snap(name,target){
-    var done=false;
-    state.db.collection(name).onSnapshot(function(s){
-      var o={};s.docs.forEach(function(d){o[d.id]=d.data()||{}});
-      state[target]=o;render();
-    },function(){render()});
-  }
-
-  render();
-  if(window.claude&&claude.use){
-    Promise.all([claude.use("db"),claude.use("user")]).then(function(r){
-      state.ready=true;state.db=r[0];
-      if(r[1]){try{r[1].canEdit().then(function(v){state.canEdit=!!v;render()})}catch(e){}}
-      if(state.db){snap("availability","free");snap("bookings","books")}
-      render();
-    }).catch(function(){state.ready=true;render()});
-    setTimeout(function(){if(!state.ready){state.ready=true;render()}},10000);
-  }else{state.ready=true;render()}
-})();
+}
+render();
 </script>
 </body>
 </html>
